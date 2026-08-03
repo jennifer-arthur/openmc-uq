@@ -96,16 +96,16 @@ class ModelPerturber:
             mode = attr  # 'delta' or 'fraction'
             if mode not in ('delta', 'fraction'):
                 raise ValueError(
-                    f"Invalid isotopic mode '{mode}' for param '{param}' — "
-                    f"expected 'delta' or 'fraction' (e.g. '{name}.fraction')."
+                    f"Invalid isotopic mode '{mode}' for '{name}' — expected "
+                    f"'delta' or 'fraction' (e.g. '{name}.delta' or '{name}.fraction')."
                 )
             fraction_type = self._get_fraction_type(obj)
             current = {n.name: n.percent for n in obj.nuclides}
-            unknown = [iso for iso in delta if iso not in current]
+            unknown = set(delta.keys()) - set(current.keys())
             if unknown:
                 raise KeyError(
-                    f"Unknown isotope(s) {unknown} for material '{name}' — "
-                    f"available isotopes: {sorted(current.keys())}."
+                    f"Isotope(s) {sorted(unknown)} not found in material '{name}'. "
+                    f"Available isotopes: {sorted(current.keys())}."
                 )
             self._nominals[param] = current
             new_fractions = dict(current)
