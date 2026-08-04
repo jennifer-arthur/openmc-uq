@@ -1,0 +1,19 @@
+site_name: openmc_uq
+site_description: Systematic uncertainty propagation for OpenMC
+
+theme:
+  name: material
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Home: index.md
+  - API Reference: reference.md

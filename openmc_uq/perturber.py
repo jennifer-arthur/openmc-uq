@@ -1,8 +1,25 @@
 class ModelPerturber:
-    """Applies parameter perturbations to OpenMC model objects in memory.
-    Perturbations are pure in-memory mutations (no XML export) — that
-    responsibility belongs to SimulationRunner, right before it calls
-    model.run().
+    """Apply parameter perturbations to an OpenMC model in memory.
+
+    Perturbations are pure in-memory mutations of the model's materials
+    and surfaces — no XML is written. Writing the perturbed state to
+    disk is SimulationRunner's responsibility, right before it calls
+    ``model.run()``.
+
+    Parameters
+    ----------
+    model : openmc.Model
+        The OpenMC model to perturb. Materials and surfaces must be
+        named (via ``name=``) to be addressable by this class.
+
+    Attributes
+    ----------
+    model : openmc.Model
+        The wrapped model, mutated in place by `perturb`.
+    surfaces : dict[str, openmc.Surface]
+        Named surfaces in the model geometry, keyed by name.
+    materials : dict[str, openmc.Material]
+        Named materials in the model, keyed by name.
     """
 
     def __init__(self, model):
@@ -14,10 +31,31 @@ class ModelPerturber:
         self._nominals = {}
 
     def _build_named_dict(self, objects, kind):
+        """Build a name-keyed lookup dict from a collection of model objects.
+
+        Skips unnamed objects (they simply aren't addressable by `perturb`).
+
+        Parameters
+        ----------
+        objects : iterable
+            Surfaces or materials to index.
+        kind : str
+            ``'surface'`` or ``'material'`` — used only for error messages.
+
+        Returns
+        -------
+        dict[str, object]
+            Mapping of object name to object.
+
+        Raises
+        ------
+        ValueError
+            If two objects share the same name.
+        """
         named = {}
         for obj in objects:
             if not obj.name:
-                continue  # unnamed objects just aren't referenceable — fine
+                continue
             if obj.name in named:
                 raise ValueError(
                     f"Duplicate {kind} name '{obj.name}' (IDs {named[obj.name].id} "
@@ -27,6 +65,25 @@ class ModelPerturber:
         return named
 
     def _get_object(self, name, ptype):
+        """Look up a named material or surface by parameter type.
+
+        Parameters
+        ----------
+        name : str
+            Object name, as used in a dotted `param` string.
+        ptype : {'geometry', 'density', 'isotopic'}
+            Determines whether `name` is looked up in `materials` or
+            `surfaces`.
+
+        Returns
+        -------
+        openmc.Material or openmc.Surface
+
+        Raises
+        ------
+        KeyError
+            If no object with `name` exists in the relevant registry.
+    """
         registry = self.materials if ptype in ('density', 'isotopic') else self.surfaces
         try:
             return registry[name]
@@ -41,6 +98,22 @@ class ModelPerturber:
 
     # Helper function for isotopics perturbations
     def _get_fraction_type(self, material):
+        """Get a material's nuclide percent type, asserting it's uniform.
+
+        Parameters
+        ----------
+        material : openmc.Material
+
+        Returns
+        -------
+        str
+            ``'ao'`` (atom fraction) or ``'wo'`` (weight fraction).
+
+        Raises
+        ------
+        ValueError
+            If the material's nuclides mix atom and weight fractions.
+        """
         types = {n.percent_type for n in material.nuclides}
         if len(types) > 1:
             raise ValueError(
@@ -51,19 +124,51 @@ class ModelPerturber:
 
     def perturb(self, param, delta, ptype):
         """Perturb a model parameter in memory.
-        Args:
-            param: Dotted name string. For 'geometry': "surfacename.attr".
-                For 'density': "materialname.density". For 'isotopic':
-                "materialname.mode", where mode is 'delta' or 'fraction'.
-            delta: dict mapping keys to perturbation values.
-                For 'geometry'/'density': single-entry dict, e.g.
-                {"r": 0.01} or {"density": 0.001} (key is unused, only
-                the value matters).
-                For 'isotopic': {isotope_name: value, ...} for one or
-                more isotopes; value is interpreted as a delta or a
-                target fraction depending on mode. Unspecified isotopes
-                are renormalized.
-            ptype: 'geometry', 'density', or 'isotopic'.
+
+        Parameters
+        ----------
+        param : str
+            Dotted name identifying the target and attribute. Format
+            depends on `ptype`:
+
+            - ``'geometry'`` : ``"surfacename.attr"``, e.g. ``"sph10.r"``.
+            - ``'density'`` : ``"materialname.density"``.
+            - ``'isotopic'`` : ``"materialname.mode"``, where mode is
+              ``'delta'`` or ``'fraction'``.
+        delta : dict
+            Perturbation values. Shape depends on `ptype`:
+
+            - ``'geometry'`` : single-entry dict whose key must match the
+              attribute name in `param`, e.g. ``{"r": 0.01}`` for
+              ``param="sph10.r"``.
+            - ``'density'`` : single-entry dict with key ``"density"``,
+              e.g. ``{"density": 0.001}``.
+            - ``'isotopic'`` : ``{isotope_name: value, ...}`` for one or
+              more isotopes. `value` is added to the current fraction if
+              mode is ``'delta'``, or sets the fraction directly if mode
+              is ``'fraction'``. Isotopes not listed keep their current
+              fraction unchanged (no renormalization is performed).
+        ptype : {'geometry', 'density', 'isotopic'}
+            Which kind of perturbation to apply.
+
+        Raises
+        ------
+        ValueError
+            If `param` isn't in ``"name.attr"`` format, if `attr` is
+            invalid for the given `ptype` (e.g. not ``'density'`` for a
+            density perturbation, or not ``'delta'``/``'fraction'`` for
+            an isotopic one), or if `ptype` is unrecognized.
+        RuntimeError
+            If `param` is already perturbed (call `restore` first).
+        KeyError
+            If the named surface/material doesn't exist, or an isotope
+            in `delta` isn't present in the target material.
+
+        Notes
+            -----
+            Fractions are not renormalized to sum to 1 after a perturbation;
+            OpenMC normalizes nuclide fractions internally at run time, so
+            this is safe to leave as-is.
         """
         try:
             name, attr = param.split('.')
@@ -119,6 +224,31 @@ class ModelPerturber:
             raise ValueError(f"Unknown parameter type '{ptype}' for param '{param}'")
 
     def restore(self, param, ptype):
+        """Reset a previously perturbed parameter back to its nominal value.
+
+        Parameters
+        ----------
+        param : str
+            The same dotted name string passed to the corresponding
+            `perturb` call, e.g. ``"sph10.r"``.
+        ptype : {'geometry', 'density', 'isotopic'}
+            The same `ptype` passed to the corresponding `perturb` call.
+
+        Raises
+        ------
+        RuntimeError
+            If `param` hasn't been perturbed (or was already restored).
+        KeyError
+            If the named surface/material no longer exists in the model.
+        ValueError
+            If `ptype` is unrecognized.
+
+        Notes
+        -----
+        `param` and `ptype` must match the values used in the `perturb`
+        call being undone — mismatches will look up the wrong object or
+        hit the "unrecognized ptype" branch rather than erroring clearly.
+        """
         if param not in self._nominals:
             raise RuntimeError(
                 f"Cannot restore '{param}' — it hasn't been perturbed "

@@ -22,3 +22,6 @@ htmlcov/
 
 # pip
 *.egg-info/
+
+# mkdocs
+site/
