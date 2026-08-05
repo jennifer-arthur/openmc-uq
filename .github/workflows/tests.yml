@@ -9,14 +9,25 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: "3.11"
-      - name: Install package
+          activate-environment: test
+          auto-activate-base: false
+          channels: conda-forge
+
+      - name: Install dependencies
+        shell: bash -el {0}
         run: |
+          conda install openmc
           pip install -e .
           pip install pytest
+
       - name: Run tests
-        run: pytest -v
+        shell: bash -el {0}
+        run: |
+          pytest -v
