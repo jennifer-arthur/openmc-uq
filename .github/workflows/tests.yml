@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: "3.11"
+          activate-environment: test
+          auto-activate-base: false
+          channels: conda-forge
+
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          conda install -c conda-forge openmc
+          pip install -e .
+          pip install pytest
+
+      - name: Run tests
+        shell: bash -el {0}
+        run: |
+          pytest -v
