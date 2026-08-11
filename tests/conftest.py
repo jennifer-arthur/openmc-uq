@@ -1,6 +1,7 @@
 import pytest
 import openmc
 from openmc_uq.perturber import ModelPerturber
+from openmc_uq.runner import SimulationRunner
 
 """
 Pytest fixtures for ModelPerturber tests.
@@ -13,6 +14,10 @@ Fixtures:
   material model. Use when a test only needs to prove general
   mechanics (e.g. geometry perturb/restore) without Godiva's full
   complexity.
+- runner: SimulationRunner built on the simple single-sphere model
+  (via _build_simple_model()). Runs real OpenMC simulations in a
+  pytest tmp_path directory, so no cross-section-heavy Godiva runs
+  and no pollution of the real project output directory.
 - model_dup_surface / model_dup_material: raw openmc.Model instances
   (not yet wrapped in ModelPerturber) with intentionally duplicated
   surface/material names, for testing the _build_named_dict()
@@ -137,6 +142,10 @@ def _build_simple_model():
 @pytest.fixture
 def perturber_simple():
     return ModelPerturber(_build_simple_model())
+
+@pytest.fixture
+def runner(tmp_path):
+    return SimulationRunner(_build_simple_model(), output_dir=tmp_path)
 
 def _build_dup_surface_model():
     mat = openmc.Material(name='mat')
