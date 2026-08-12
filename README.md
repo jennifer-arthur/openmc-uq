@@ -10,7 +10,7 @@ OpenMC has no equivalent to `mcnp_pstudy`. Its Python API is powerful enough to 
 
 **openmc_uq** is meant to be a reusable tool. It takes an OpenMC model and a JSON uncertainty specification (for densities, isotopics, and geometry parameters), perturbs each parameter directly in memory (no input-file proliferation — OpenMC models are just Python objects), runs the perturbation study, applies the sandwich rule to combine sensitivities into a total uncertainty, flags non-linear or asymmetric responses, and outputs an HDF5 + JSON report.
 
-**Status:** Early development. Core functionality for perturbing and restoring an OpenMC model in memory is implemented and unit-tested. The perturbation loop, sandwich-rule uncertainty calculation, and HDF5/JSON reporting are still in progress.
+**Status:** Early development. Core functionality for perturbing and restoring an OpenMC model in memory is implemented and unit-tested, as is running a model and extracting k-effective results. The perturbation loop, sandwich-rule uncertainty calculation, and HDF5/JSON reporting are still in progress.
 
 ## Install
 
@@ -24,33 +24,39 @@ pip install -e .
 
 ## Usage
 
-Currently, only in-memory perturb/restore of model parameters is implemented.
+Currently, in-memory perturb/restore of model parameters and running a model to extract k-effective are implemented.
 
 ```python
 import openmc
-from openmc_uq import ModelPerturber
+from openmc_uq.perturber import ModelPerturber
+from openmc_uq.runner import SimulationRunner
 
 # Build your OpenMC model as usual, naming any surface/material you want to perturb
 # ... define geometry, materials, settings ...
 # e.g. a sphere surface named "sph10", a material named "u1"
+
 model = openmc.Model()
-
 perturber = ModelPerturber(model)
+runner = SimulationRunner(model)  # output_dir defaults to './openmc_uq_runs'
 
-# Perturb a geometry parameter (surface radius) by +0.01 cm
+# Get a baseline k-effective before perturbing anything
+nominal = runner.run("nominal")
+print(nominal.keff_mean, nominal.keff_std)
+
+# Perturb a geometry parameter (surface radius) by +0.01 cm, run, then restore
 perturber.perturb("sph10.r", {"r": 0.01}, ptype="geometry")
-# ... run model, record k-eff ...
-# Restore to nominal before the next perturbation
+result = runner.run("sph10.r_+0.01")
+print(result.keff_mean, result.keff_std, result.path)
 perturber.restore("sph10.r", ptype="geometry")
 
-# Perturb a material's density by +0.001 g/cc
+# Perturb a material's density by +0.001 g/cc, run, then restore
 perturber.perturb("u1.density", {"density": 0.001}, ptype="density")
-# ... run model, record k-eff ...
+result = runner.run("u1.density_+0.001")
 perturber.restore("u1.density", ptype="density")
 
-# Perturb a material's isotopic composition (add 0.0001 to U235 atom/weight fraction)
+# Perturb a material's isotopic composition (add 0.0001 to U235 atom/weight fraction), run, then restore
 perturber.perturb("u1.delta", {"U235": 0.0001}, ptype="isotopic")
-# ... run model, record k-eff ...
+result = runner.run("u1.U235_+0.0001")
 perturber.restore("u1.delta", ptype="isotopic")
 ```
 
