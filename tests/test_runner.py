@@ -12,25 +12,31 @@ OpenMC internals. Cross-section data must be available via the
 OPENMC_CROSS_SECTIONS environment variable.
 """
 
+requires_cross_sections = pytest.mark.skipif(
+    "OPENMC_CROSS_SECTIONS" not in os.environ,
+    reason="OPENMC_CROSS_SECTIONS not set; cross-section data unavailable in this environment.",
+)
+
+@requires_cross_sections
 def test_run_returns_sane_result(runner):
     result = runner.run('nominal')
     assert 0.0 < result.keff_mean < 2.0
     assert result.keff_std > 0.0
 
-
+@requires_cross_sections
 def test_run_creates_labeled_file(runner):
     result = runner.run('nominal')
     assert os.path.basename(result.path) == 'nominal.h5'
     assert os.path.exists(result.path)
 
-
+@requires_cross_sections
 def test_run_same_label_overwrites(runner):
     result1 = runner.run('nominal')
     result2 = runner.run('nominal')
     assert result1.path == result2.path
     assert os.path.exists(result2.path)
 
-
+@requires_cross_sections
 def test_run_different_labels_produce_different_files(runner):
     result1 = runner.run('nominal')
     result2 = runner.run('perturbed')
