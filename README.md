@@ -44,20 +44,20 @@ nominal = runner.run("nominal")
 print(nominal.keff_mean, nominal.keff_std)
 
 # Perturb a geometry parameter (surface radius) by +0.01 cm, run, then restore
-perturber.perturb("sph10.r", {"r": 0.01}, ptype="geometry")
+perturber.perturb("sph10.r", 0.01, ptype="geometry")
 result = runner.run("sph10.r_+0.01")
 print(result.keff_mean, result.keff_std, result.path)
-perturber.restore("sph10.r", ptype="geometry")
+perturber.restore("sph10.r")
 
 # Perturb a material's density by +0.001 g/cc, run, then restore
-perturber.perturb("u1.density", {"density": 0.001}, ptype="density")
+perturber.perturb("u1.density", 0.001, ptype="density")
 result = runner.run("u1.density_+0.001")
-perturber.restore("u1.density", ptype="density")
+perturber.restore("u1.density")
 
 # Perturb a material's isotopic composition (add 0.0001 to U235 atom/weight fraction), run, then restore
-perturber.perturb("u1.delta", {"U235": 0.0001}, ptype="isotopic")
+perturber.perturb("u1.delta", 0.0001, ptype="isotopic", isotope="U235")
 result = runner.run("u1.U235_+0.0001")
-perturber.restore("u1.delta", ptype="isotopic")
+perturber.restore("u1.delta")
 ```
 
 ## License

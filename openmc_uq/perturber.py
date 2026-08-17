@@ -122,7 +122,7 @@ class ModelPerturber:
             )
         return types.pop()
 
-    def perturb(self, param, delta, ptype):
+    def perturb(self, param, value, ptype, isotope=None):
         """Perturb a model parameter in memory.
 
         Parameters
@@ -135,40 +135,28 @@ class ModelPerturber:
             - ``'density'`` : ``"materialname.density"``.
             - ``'isotopic'`` : ``"materialname.mode"``, where mode is
               ``'delta'`` or ``'fraction'``.
-        delta : dict
-            Perturbation values. Shape depends on `ptype`:
-
-            - ``'geometry'`` : single-entry dict whose key must match the
-              attribute name in `param`, e.g. ``{"r": 0.01}`` for
-              ``param="sph10.r"``.
-            - ``'density'`` : single-entry dict with key ``"density"``,
-              e.g. ``{"density": 0.001}``.
-            - ``'isotopic'`` : ``{isotope_name: value, ...}`` for one or
-              more isotopes. `value` is added to the current fraction if
-              mode is ``'delta'``, or sets the fraction directly if mode
-              is ``'fraction'``. Isotopes not listed keep their current
-              fraction unchanged (no renormalization is performed).
+        value : float
+            The perturbation magnitude. Added to the current value if
+            `ptype` is ``'geometry'``, ``'density'``, or isotopic with
+            mode ``'delta'``; sets the value directly if isotopic with
+            mode ``'fraction'``.
         ptype : {'geometry', 'density', 'isotopic'}
             Which kind of perturbation to apply.
+        isotope : str, optional
+            Isotope name (e.g. ``'U235'``), required if and only if
+            `ptype` is ``'isotopic'``.
 
         Raises
         ------
         ValueError
             If `param` isn't in ``"name.attr"`` format, if `attr` is
-            invalid for the given `ptype` (e.g. not ``'density'`` for a
-            density perturbation, or not ``'delta'``/``'fraction'`` for
-            an isotopic one), or if `ptype` is unrecognized.
+            invalid for the given `ptype`, if `ptype` is unrecognized,
+            or if `isotope` is missing/provided inconsistently with `ptype`.
         RuntimeError
             If `param` is already perturbed (call `restore` first).
         KeyError
-            If the named surface/material doesn't exist, or an isotope
-            in `delta` isn't present in the target material.
-
-        Notes
-            -----
-            Fractions are not renormalized to sum to 1 after a perturbation;
-            OpenMC normalizes nuclide fractions internally at run time, so
-            this is safe to leave as-is.
+            If the named surface/material doesn't exist, or `isotope`
+            isn't present in the target material.
         """
         try:
             name, attr = param.split('.')
@@ -179,22 +167,41 @@ class ModelPerturber:
             )
         if param in self._nominals:
             raise RuntimeError(
-                f"'{param}' is already perturbed — call restore('{param}', '{ptype}') "
+                f"'{param}' is already perturbed — call restore('{param}') "
                 f"before perturbing it again."
+            )
+        if ptype == 'isotopic' and isotope is None:
+            raise ValueError(
+                f"ptype='isotopic' requires an 'isotope' argument (e.g. isotope='U235')."
+            )
+        if ptype != 'isotopic' and isotope is not None:
+            raise ValueError(
+                f"isotope='{isotope}' was given but ptype='{ptype}' — 'isotope' is "
+                f"only valid when ptype='isotopic'."
             )
         obj = self._get_object(name, ptype)
         if ptype == 'geometry':
-            value = delta[attr]
-            self._nominals[param] = getattr(obj, attr)
-            setattr(obj, attr, self._nominals[param] + value)
+            nominal_value = getattr(obj, attr)
+            self._nominals[param] = {
+                'ptype': ptype,
+                'isotope': None,
+                'value': nominal_value,
+                'nuclide_order': None,
+            }
+            setattr(obj, attr, nominal_value + value)
         elif ptype == 'density':
             if attr != 'density':
                 raise ValueError(
                     f"Invalid attribute '{attr}' for density perturbation of "
                     f"'{name}' — expected 'density' (e.g. '{name}.density')."
                 )
-            value = delta[attr]
-            self._nominals[param] = (obj.density, obj.density_units)
+            nominal_value = (obj.density, obj.density_units)
+            self._nominals[param] = {
+                'ptype': ptype,
+                'isotope': None,
+                'value': nominal_value,
+                'nuclide_order': None,
+            }
             new_density = obj.density + value
             obj.set_density(obj.density_units, new_density)
         elif ptype == 'isotopic':
@@ -206,67 +213,66 @@ class ModelPerturber:
                 )
             fraction_type = self._get_fraction_type(obj)
             current = {n.name: n.percent for n in obj.nuclides}
-            unknown = set(delta.keys()) - set(current.keys())
-            if unknown:
+            if isotope not in current:
                 raise KeyError(
-                    f"Isotope(s) {sorted(unknown)} not found in material '{name}'. "
+                    f"Isotope '{isotope}' not found in material '{name}'. "
                     f"Available isotopes: {sorted(current.keys())}."
                 )
-            self._nominals[param] = current
-            new_fractions = dict(current)
-            for iso, value in delta.items():
-                new_fractions[iso] = value if mode == 'fraction' else current[iso] + value
-            for iso in list(current.keys()):
-                obj.remove_nuclide(iso)
-            for iso, frac in new_fractions.items():
-                obj.add_nuclide(iso, frac, fraction_type)
+            nuclide_order = [n.name for n in obj.nuclides]
+            self._nominals[param] = {
+                'ptype': ptype,
+                'isotope': isotope,
+                'value': current[isotope],
+                'nuclide_order': nuclide_order,
+            }
+            new_fraction = value if mode == 'fraction' else current[isotope] + value
+            obj.remove_nuclide(isotope)
+            obj.add_nuclide(isotope, new_fraction, fraction_type)
         else:
             raise ValueError(f"Unknown parameter type '{ptype}' for param '{param}'")
 
-    def restore(self, param, ptype):
-        """Reset a previously perturbed parameter back to its nominal value.
+    def restore(self, param):
+            """Reset a previously perturbed parameter back to its nominal value.
 
-        Parameters
-        ----------
-        param : str
-            The same dotted name string passed to the corresponding
-            `perturb` call, e.g. ``"sph10.r"``.
-        ptype : {'geometry', 'density', 'isotopic'}
-            The same `ptype` passed to the corresponding `perturb` call.
+            Parameters
+            ----------
+            param : str
+                The same dotted name string passed to the corresponding
+                `perturb` call, e.g. ``"sph10.r"``.
 
-        Raises
-        ------
-        RuntimeError
-            If `param` hasn't been perturbed (or was already restored).
-        KeyError
-            If the named surface/material no longer exists in the model.
-        ValueError
-            If `ptype` is unrecognized.
-
-        Notes
-        -----
-        `param` and `ptype` must match the values used in the `perturb`
-        call being undone — mismatches will look up the wrong object or
-        hit the "unrecognized ptype" branch rather than erroring clearly.
-        """
-        if param not in self._nominals:
-            raise RuntimeError(
-                f"Cannot restore '{param}' — it hasn't been perturbed "
-                f"(or was already restored)."
-            )
-        name, attr = param.split('.')
-        obj = self._get_object(name, ptype)
-        if ptype == 'geometry':
-            setattr(obj, attr, self._nominals[param])
-        elif ptype == 'density':
-            value, units = self._nominals[param]
-            obj.set_density(units, value)
-        elif ptype == 'isotopic':
-            fraction_type = self._get_fraction_type(obj)
-            for iso in list(self._nominals[param].keys()):
-                obj.remove_nuclide(iso)
-            for iso, frac in self._nominals[param].items():
-                obj.add_nuclide(iso, frac, fraction_type)
-        else:
-            raise ValueError(f"Unknown parameter type '{ptype}' for param '{param}'")
-        del self._nominals[param]
+            Raises
+            ------
+            RuntimeError
+                If `param` hasn't been perturbed (or was already restored).
+            KeyError
+                If the named surface/material no longer exists in the model.
+            ValueError
+                If the stored `ptype` is unrecognized (should not occur
+                in normal use).
+            """
+            if param not in self._nominals:
+                raise RuntimeError(
+                    f"Cannot restore '{param}' — it hasn't been perturbed "
+                    f"(or was already restored)."
+                )
+            record = self._nominals[param]
+            ptype = record['ptype']
+            isotope = record['isotope']
+            name, attr = param.split('.')
+            obj = self._get_object(name, ptype)
+            if ptype == 'geometry':
+                setattr(obj, attr, record['value'])
+            elif ptype == 'density':
+                value, units = record['value']
+                obj.set_density(units, value)
+            elif ptype == 'isotopic':
+                fraction_type = self._get_fraction_type(obj)
+                current = {n.name: n.percent for n in obj.nuclides}
+                current[isotope] = record['value']
+                for n in list(obj.nuclides):
+                    obj.remove_nuclide(n.name)
+                for n_name in record['nuclide_order']:
+                    obj.add_nuclide(n_name, current[n_name], fraction_type)
+            else:
+                raise ValueError(f"Unknown parameter type '{ptype}' for param '{param}'")
+            del self._nominals[param]
