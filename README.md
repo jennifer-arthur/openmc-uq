@@ -55,9 +55,9 @@ result = runner.run("u1.density_+0.001")
 perturber.restore("u1.density")
 
 # Perturb a material's isotopic composition (add 0.0001 to U235 atom/weight fraction), run, then restore
-perturber.perturb("u1.delta", 0.0001, ptype="isotopic", isotope="U235")
+perturber.perturb("u1.U235", 0.0001, ptype="isotopic")
 result = runner.run("u1.U235_+0.0001")
-perturber.restore("u1.delta")
+perturber.restore("u1.U235")
 ```
 
 ## License
