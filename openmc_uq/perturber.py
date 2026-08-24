@@ -122,6 +122,37 @@ class ModelPerturber:
             )
         return types.pop()
 
+    def resolve(self, param, ptype):
+        """Parse a dotted param string and locate its target object.
+
+        Parameters
+        ----------
+        param : str
+            Dotted "name.attr" string.
+        ptype : {'geometry', 'density', 'isotopic'}
+
+        Returns
+        -------
+        tuple[object, str]
+            (target object, attr) — attr is returned too since callers
+            that mutate (perturb/restore) need it.
+
+        Raises
+        ------
+        ValueError
+            If `param` isn't in "name.attr" format.
+        KeyError
+            If the named object doesn't exist (from `_get_object`).
+        """
+        try:
+            name, attr = param.split('.')
+        except ValueError:
+            raise ValueError(
+                f"Invalid param string '{param}' — expected format 'name.attr' "
+                f"(e.g. 'sph10.r'), got {param.count('.')} dot(s) instead of 1."
+            )
+        return self._get_object(name, ptype), attr
+
     def perturb(self, param, value, ptype):
         """Perturb a model parameter in memory.
 
@@ -150,19 +181,12 @@ class ModelPerturber:
             If the named surface/material doesn't exist, or the isotope
             isn't present in the target material.
         """
-        try:
-            name, attr = param.split('.')
-        except ValueError:
-            raise ValueError(
-                f"Invalid param string '{param}' — expected format 'name.attr' "
-                f"(e.g. 'sph10.r'), got {param.count('.')} dot(s) instead of 1."
-            )
         if param in self._nominals:
             raise RuntimeError(
                 f"'{param}' is already perturbed — call restore('{param}') "
                 f"before perturbing it again."
             )
-        obj = self._get_object(name, ptype)
+        obj, attr = self.resolve(param, ptype)
         if ptype == 'geometry':
             nominal_value = getattr(obj, attr)
             self._nominals[param] = {
@@ -174,7 +198,7 @@ class ModelPerturber:
             if attr != 'density':
                 raise ValueError(
                     f"Invalid attribute '{attr}' for density perturbation of "
-                    f"'{name}' — expected 'density' (e.g. '{name}.density')."
+                    f"'{obj.name}' — expected 'density' (e.g. '{obj.name}.density')."
                 )
             nominal_value = (obj.density, obj.density_units)
             self._nominals[param] = {
@@ -189,7 +213,7 @@ class ModelPerturber:
             current = {n.name: n.percent for n in obj.nuclides}
             if isotope not in current:
                 raise KeyError(
-                    f"Isotope '{isotope}' not found in material '{name}'. "
+                    f"Isotope '{isotope}' not found in material '{obj.name}'. "
                     f"Available isotopes: {sorted(current.keys())}."
                 )
             nuclide_order = [n.name for n in obj.nuclides]
@@ -230,8 +254,7 @@ class ModelPerturber:
             )
         record = self._nominals[param]
         ptype = record['ptype']
-        name, attr = param.split('.')
-        obj = self._get_object(name, ptype)
+        obj, attr = self.resolve(param, ptype)
         if ptype == 'geometry':
             setattr(obj, attr, record['value'])
         elif ptype == 'density':
