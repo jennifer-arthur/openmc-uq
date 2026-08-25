@@ -10,7 +10,7 @@ OpenMC has no equivalent to `mcnp_pstudy`. Its Python API is powerful enough to 
 
 **openmc_uq** is meant to be a reusable tool. It takes an OpenMC model and a JSON uncertainty specification (for densities, isotopics, and geometry parameters), perturbs each parameter directly in memory (no input-file proliferation — OpenMC models are just Python objects), runs the perturbation study, applies the sandwich rule to combine sensitivities into a total uncertainty, flags non-linear or asymmetric responses, and outputs an HDF5 + JSON report.
 
-**Status:** Early development. Core functionality for perturbing and restoring an OpenMC model in memory is implemented and unit-tested, as is running a model and extracting k-effective results. The perturbation loop, sandwich-rule uncertainty calculation, and HDF5/JSON reporting are still in progress.
+**Status:** Early development. Core functionality for perturbing and restoring an OpenMC model in memory is implemented and unit-tested, as is running a model and extracting k-effective results, and parsing/validating user-defined uncertainty specifications. The perturbation loop, sandwich-rule uncertainty calculation, and HDF5/JSON reporting are still in progress.
 
 ## Install
 
@@ -23,8 +23,7 @@ pip install -e .
 ```
 
 ## Usage
-
-Currently, in-memory perturb/restore of model parameters and running a model to extract k-effective are implemented.
+Currently, in-memory perturb/restore of model parameters, running a model to extract k-effective, and reading in a JSON uncertainties file are implemented.
 
 ```python
 import openmc
@@ -34,7 +33,6 @@ from openmc_uq.runner import SimulationRunner
 # Build your OpenMC model as usual, naming any surface/material you want to perturb
 # ... define geometry, materials, settings ...
 # e.g. a sphere surface named "sph10", a material named "u1"
-
 model = openmc.Model()
 perturber = ModelPerturber(model)
 runner = SimulationRunner(model)  # output_dir defaults to './openmc_uq_runs'
@@ -59,6 +57,25 @@ perturber.perturb("u1.U235", 0.0001, ptype="isotopic")
 result = runner.run("u1.U235_+0.0001")
 perturber.restore("u1.U235")
 ```
+
+Uncertainty specifications can be loaded from JSON and validated against a model before any runs are made:
+
+```python
+from openmc_uq.config import UncertaintyConfig
+
+# uncertainties.json:
+# {
+#   "parameters": [
+#     {"name": "sph10.r", "type": "geometry", "sigma": 0.01},
+#     {"name": "u1.density", "type": "density", "sigma": 0.001},
+#     {"name": "u1.U235", "type": "isotopic", "sigma": 0.0001}
+#   ]
+# }
+config = UncertaintyConfig.from_json("uncertainties.json")
+config.validate(model)  # raises early if a parameter name doesn't resolve
+```
+
+`UncertaintyConfig` currently handles parsing and validating an uncertainty specification against a model. Wiring it into the full perturb/run loop (the sandwich-rule calculation) is in progress.
 
 ## License
 
