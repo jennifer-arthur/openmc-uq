@@ -64,6 +64,41 @@ def test_restore_before_perturb(perturber, param):
     with pytest.raises(RuntimeError):
         perturber.restore(param)
 
+##### RESOLVE #########################
+
+@pytest.mark.parametrize("param, ptype, expected_registry, expected_attr", [
+    ("sph10.r", "geometry", "surfaces", "r"),
+    ("HEU6.density", "density", "materials", "density"),
+    ("HEU6.U235", "isotopic", "materials", "U235"),
+])
+def test_resolve_valid(perturber, param, ptype, expected_registry, expected_attr):
+    name = param.split('.')[0]
+    registry = getattr(perturber, expected_registry)
+
+    obj, attr = perturber.resolve(param, ptype)
+
+    assert obj is registry[name]
+    assert attr == expected_attr
+
+
+@pytest.mark.parametrize("param, ptype", [
+    ("sph10r", "geometry"),
+    ("HEU6..density", "density"),
+    ("HEU6..U235", "isotopic"),
+])
+def test_resolve_missing_dot(perturber, param, ptype):
+    with pytest.raises(ValueError):
+        perturber.resolve(param, ptype)
+
+
+@pytest.mark.parametrize("param, ptype", [
+    ("nonexistent.r", "geometry"),
+    ("nonexistent.density", "density"),
+    ("nonexistent.foo", "isotopic"),
+])
+def test_resolve_nonexistent_name(perturber, param, ptype):
+    with pytest.raises(KeyError):
+        perturber.resolve(param, ptype)
 
 ##### GEOMETRY #########################
 
