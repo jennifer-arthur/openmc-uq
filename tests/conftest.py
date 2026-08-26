@@ -4,7 +4,7 @@ from openmc_uq.perturber import ModelPerturber
 from openmc_uq.runner import SimulationRunner
 
 """
-Pytest fixtures for ModelPerturber tests.
+Pytest fixtures for ModelPerturber and SimulationRunner tests.
 
 Fixtures:
 - perturber: ModelPerturber built on the full Godiva benchmark model
@@ -188,3 +188,18 @@ def model_dup_surface():
 @pytest.fixture
 def model_dup_material():
     return _build_dup_material_model()
+
+def test_compute_sensitivity_correct_value():
+    param = Parameter(name='sph10.r', ptype='geometry', sigma=0.01)
+
+    fake_runner = FakeRunner(results={
+        'sph10.r_+1sigma': RunResult(keff_mean=1.00100, keff_std=0.0005, path='fake_plus.h5'),
+        'sph10.r_-1sigma': RunResult(keff_mean=0.99900, keff_std=0.0005, path='fake_minus.h5'),
+    })
+    fake_perturber = FakePerturber()
+
+    analysis = UQAnalysis(config=None, perturber=fake_perturber, runner=fake_runner)
+    sensitivity = analysis._compute_sensitivity(param)
+
+    expected = (1.00100 - 0.99900) / (2 * 0.01)
+    assert sensitivity == pytest.approx(expected)
